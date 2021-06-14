@@ -1,0 +1,21 @@
+string = ${ "\"" ~ (ASCII_ALPHANUMERIC | "." | "/")* ~ "\"" }
+
+variable = ${ ASCII_ALPHA+ ~ ASCII_DIGIT* }
+hex = ${"#" ~ ASCII_HEX_DIGIT+}
+int = ${ ASCII_DIGIT+ }
+
+value = ${ string | hex | int | variable }
+
+WHITESPACE = _{ (" " | "\t") }
+
+OpenExpr = {"OPEN" ~ string ~ variable}
+OutputExpr = {"OUTPUT" ~ variable}
+PrintExpr = {"PRINT" ~ value}
+SaveExpr = { "SAVE" ~ variable ~ string }
+
+ResizeExpr = {"RESIZE" ~ variable ~ value ~ value ~ string ~ variable}  // RESIZE input 500 500 output
+
+expr = { OpenExpr | OutputExpr | PrintExpr | ResizeExpr | SaveExpr }
+
+stmt = _{ expr }
+program = _{ SOI ~ "\n"* ~ (stmt ~ "\n"+) * ~ stmt? ~ EOI }
