@@ -14,10 +14,10 @@ pub struct IMGParser;
 #[derive(Debug, Clone)]
 pub enum AstNode {
     Print(Box<AstNode>),
-    Open(Box<AstNode>, Box<AstNode>),
-    Resize(Box<AstNode>, Box<(AstNode, AstNode)>, Box<AstNode>, Box<AstNode>),
+    Open(Box<(AstNode, AstNode)>),
+    Resize(Box<(AstNode, AstNode, AstNode, AstNode, AstNode)>),
     Output(Box<AstNode>),
-    Save(Box<AstNode>, Box<AstNode>),
+    Save(Box<(AstNode, AstNode)>),
     String(String),
     Variable(String),
     Int(i64),
@@ -28,7 +28,7 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
         Rule::expr => build_ast_from_expr(pair.into_inner().next().unwrap()),
         Rule::OpenExpr => {
             let mut pair = pair.into_inner();
-            AstNode::Open(Box::new(build_ast_from_expr(pair.next().unwrap())),Box::new(build_ast_from_expr(pair.next().unwrap())))
+            AstNode::Open(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
         },
         Rule::OutputExpr => {
             AstNode::Output(Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())))
@@ -39,16 +39,16 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
         },
         Rule::ResizeExpr => {
             let mut pair = pair.into_inner();
-            AstNode::Resize(
-                Box::new(build_ast_from_expr(pair.next().unwrap())),
-                Box::new((build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()), build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()))),
-                Box::new(build_ast_from_expr(pair.next().unwrap())),
-                Box::new(build_ast_from_expr(pair.next().unwrap())),
+            AstNode::Resize(Box::new((
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()), build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap())))
             )
         },
         Rule::SaveExpr => {
             let mut pair = pair.into_inner();
-            AstNode::Save(Box::new(build_ast_from_expr(pair.next().unwrap())), Box::new(build_ast_from_expr(pair.next().unwrap())))
+            AstNode::Save(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
         }
         Rule::string => {
             let mut chars = pair.as_span().as_str().chars();
@@ -190,9 +190,10 @@ impl Code {
     pub fn run(mut self) -> Option<Image> {
         for node in self.ast.clone().into_iter() {
             match node {
-                AstNode::Open(filebox, varbox) => {
-                    let filename = expect_string(self.get_content(*filebox).unwrap().into_owned());
-                    let variable = get_variable_name(*varbox);
+                AstNode::Open(args) => {
+                    let (file, var) = *args;
+                    let filename = expect_string(self.get_content(file).unwrap().into_owned());
+                    let variable = get_variable_name(var);
                     let image = Image::new(filename);
                     let value = VariableValue::Image(image);
 
@@ -206,11 +207,10 @@ impl Code {
                     let file = expect_image(self.get_content(*outputbox).unwrap().into_owned());
                     return Some(file);
                 },
-                AstNode::Resize(inputbox, sizebox, filterbox, outputbox) => {
-                    println!("{:?}", self.variables.keys());
-                    let image = expect_image(self.get_content(*inputbox).unwrap().into_owned());
-                    let (wbox, hbox) = *sizebox;
-                    let filter = match &*expect_string(self.get_content(*filterbox).unwrap().into_owned()) {
+                AstNode::Resize(args) => {
+                    let (input, w, h, filternode, outputnode) = *args;
+                    let image = expect_image(self.get_content(input).unwrap().into_owned());
+                    let filter = match &*expect_string(self.get_content(filternode).unwrap().into_owned()) {
                         "nearest" => transform::SamplingFilter::Nearest,
                         "triangle" => transform::SamplingFilter::Triangle,
                         "catmullrom" => transform::SamplingFilter::CatmullRom,
@@ -219,9 +219,9 @@ impl Code {
                         _ => panic!("Invalid filter")
                     };
                     
-                    let width = expect_integer(self.get_content(wbox).unwrap().into_owned()) as u32;
-                    let height = expect_integer(self.get_content(hbox).unwrap().into_owned()) as u32;
-                    let outputname = get_variable_name(*outputbox);
+                    let width = expect_integer(self.get_content(w).unwrap().into_owned()) as u32;
+                    let height = expect_integer(self.get_content(h).unwrap().into_owned()) as u32;
+                    let outputname = get_variable_name(outputnode);
 
                     let newimage = Image {
                         image: transform::resize(&image.image, width, height, filter),
@@ -229,9 +229,10 @@ impl Code {
                     };
                     self.variables.insert(outputname, VariableValue::Image(newimage));
                 },
-                AstNode::Save(imagebox, filenamebox) => {
-                    let image = expect_image(self.get_content(*imagebox).unwrap().into_owned());
-                    let outputname = expect_string(self.get_content(*filenamebox).unwrap().into_owned());
+                AstNode::Save(args) => {
+                    let (imagenode, filenamenode) = *args;
+                    let image = expect_image(self.get_content(imagenode).unwrap().into_owned());
+                    let outputname = expect_string(self.get_content(filenamenode).unwrap().into_owned());
 
                     save_image(image.image, &outputname);
                 },
