@@ -3,13 +3,16 @@ extern crate pest_derive;
 
 extern crate pest;
 
-use std::{collections::HashMap, borrow::Cow, fmt};
+use std::{borrow::Cow, collections::HashMap, fmt};
 use pest::{Parser, error::Error, iterators::Pair};
 use photon_rs::{PhotonImage, native::{open_image, save_image},  transform};
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
 pub struct IMGParser;
+
+#[derive(Debug, Clone)]
+pub enum FlipType {H, V}
 
 #[derive(Debug, Clone)]
 pub enum AstNode {
@@ -20,6 +23,7 @@ pub enum AstNode {
     Save(Box<(AstNode, AstNode)>),
     SetVar(Box<(AstNode, AstNode)>),
     GetAttr(Box<(AstNode, AstNode)>),
+    Flip(FlipType, Box<AstNode>),
     String(String),
     Variable(String),
     Int(i64),
@@ -56,6 +60,12 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
             let mut pair = pair.into_inner();
             AstNode::SetVar(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
         },
+        Rule::FlipVExpr => {
+            AstNode::Flip(FlipType::V, Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())))
+        },
+        Rule::FlipHExpr => {
+            AstNode::Flip(FlipType::H, Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())))
+        },
         Rule::getattr => {
             let mut pair = pair.into_inner();
             let var = build_ast_from_expr(pair.next().unwrap());
@@ -78,7 +88,7 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
         Rule::int => {
             AstNode::Int(pair.as_span().as_str().parse::<i64>().unwrap())
         }
-        Rule::value => {
+        Rule::value | Rule::_value => {
             build_ast_from_expr(pair.into_inner().next().unwrap())
         },
         unknown => {panic!("{:?}", unknown)}
@@ -86,22 +96,18 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
 }
 
 pub fn parse(code: &str) -> Result<Vec<AstNode>, Error<Rule>> {
-    match IMGParser::parse(Rule::program, code) {
-        Err(err) => Err(err),
-        Ok(pairs) => {
-            let mut ast = vec![];
+    let pairs =  IMGParser::parse(Rule::program, code)?;
+    let mut ast = vec![];
 
-            for pair in pairs {
-                match pair.as_rule() {
-                    Rule::expr => {
-                        ast.push(build_ast_from_expr(pair));
-                    }
-                    _ => {}
-                }
-            };
-            Ok(ast)
+    for pair in pairs {
+        match pair.as_rule() {
+            Rule::expr => {
+                ast.push(build_ast_from_expr(pair));
+            }
+            _ => {}
         }
-    }
+    };
+    Ok(ast)
 }
 
 #[derive(Debug, Clone)]
@@ -112,7 +118,7 @@ pub struct Image {
 
 impl Image {
     fn new(name: String) -> Self {
-        let image = open_image(&*name).expect(&*format!("No image found called {}", name));
+        let image = open_image(name.as_str()).expect(format!("No image found called {}", name).as_str());
         Image {image, name}
     }
 }
@@ -193,16 +199,11 @@ pub type CodeResult = Result<Code, Error<Rule>>;
 
 impl Code {
     pub fn compile(code: &str) -> CodeResult {
-        let result = parse(code);
-        match result {
-            Ok(nodes) => {
-                Ok(Code {
-                    ast: nodes,
-                    variables: HashMap::new()
-                })
-            },
-            Err(err) => panic!("{}", err)
-        }
+        let nodes = parse(code)?;
+        Ok(Code {
+            ast: nodes,
+            variables: HashMap::new()
+        })
     }
 
     pub fn get_content(&self, node: AstNode) -> Option<Cow<VariableValue>> {
@@ -219,7 +220,7 @@ impl Code {
 
                 Some(Cow::Owned(attr))
             }
-            _ => panic!("??")
+            _ => unreachable!()
         }
     }
 
@@ -246,7 +247,7 @@ impl Code {
                 AstNode::Resize(args) => {
                     let (input, w, h, filternode, outputnode) = *args;
                     let image = expect_image(self.get_content(input).unwrap().into_owned());
-                    let filter = match &*expect_string(self.get_content(filternode).unwrap().into_owned()) {
+                    let filter = match expect_string(self.get_content(filternode).unwrap().into_owned()).as_str() {
                         "nearest" => transform::SamplingFilter::Nearest,
                         "triangle" => transform::SamplingFilter::Triangle,
                         "catmullrom" => transform::SamplingFilter::CatmullRom,
@@ -254,7 +255,7 @@ impl Code {
                         "lanczons" => transform::SamplingFilter::Lanczos3,
                         _ => panic!("Invalid filter")
                     };
-                    
+
                     let width = expect_integer(self.get_content(w).unwrap().into_owned()) as u32;
                     let height = expect_integer(self.get_content(h).unwrap().into_owned()) as u32;
                     let outputname = get_variable_name(outputnode);
@@ -275,6 +276,22 @@ impl Code {
                     let outputname = expect_string(self.get_content(filenamenode).unwrap().into_owned());
 
                     save_image(image.image, &outputname);
+                },
+                AstNode::Flip(fliptype, imagebox) => {
+                    // cant use get_content because i need the var name not the var content as i use hasmap.remove not hashmap.get here
+                    
+                    let varname = match *imagebox {
+                        AstNode::Variable(name) => name,
+                        _ => panic!("Expected variable")
+                    };
+                    let mut image = expect_image(self.variables.remove(&varname).expect(format!("No variable found").as_str()));
+
+                    match fliptype {
+                        FlipType::H => transform::fliph(&mut image.image),
+                        FlipType::V => transform::flipv(&mut image.image),
+                    }
+
+                    self.variables.insert(varname, VariableValue::Image(image));
                 },
                 _ => {}
             }

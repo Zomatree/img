@@ -5,9 +5,20 @@ hex = ${"#" ~ ASCII_HEX_DIGIT+}
 int = ${ ASCII_DIGIT+ }
 attr = ${ ASCII_ALPHA+ ~ ASCII_DIGIT* }
 
-getattr = ${variable ~ "." ~ attr}
+_value = ${ string | hex | int | getattr | variable }
 
-value = ${ string | hex | int | getattr | variable }
+// math
+
+add = { _value ~ "+" ~ _value }
+minus = { _value ~ "-" ~ _value }
+divide = { _value ~ "/" ~ _value }
+intdivide = { _value ~ "//" ~ _value }
+multiply = { _value ~ "*" ~ _value }
+power = { _value ~ "**" ~ _value }
+
+value = ${ _value | add | minus | divide | intdivide | multiply | power }
+
+getattr = ${variable ~ "." ~ attr}
 
 WHITESPACE = _{ (" " | "\t") }
 
@@ -16,9 +27,12 @@ OutputExpr = {"OUTPUT" ~ variable}
 PrintExpr = {"PRINT" ~ value}
 SaveExpr = {"SAVE" ~ variable ~ string}
 SetVarExpr = {"SETVAR" ~ variable ~ value}
-ResizeExpr = {"RESIZE" ~ variable ~ value ~ value ~ string ~ variable}  // RESIZE input 500 500 output
 
-expr = { OpenExpr | OutputExpr | PrintExpr | ResizeExpr | SaveExpr | SetVarExpr }
+ResizeExpr = {"RESIZE" ~ variable ~ value ~ value ~ string ~ variable}  // RESIZE input 500 500 "nearest" output
+FlipHExpr = {"FLIPH" ~ variable }
+FlipVExpr = {"FLIPV" ~ variable }
+
+expr = { OpenExpr | OutputExpr | PrintExpr | ResizeExpr | SaveExpr | SetVarExpr | FlipHExpr | FlipVExpr }
 
 stmt = _{ expr }
 program = _{ SOI ~ "\n"* ~ (stmt ~ "\n"+) * ~ stmt? ~ EOI }
