@@ -1,18 +1,21 @@
-#[macro_use]
-extern crate pest_derive;
-
-extern crate pest;
-
-use std::{borrow::Cow, collections::HashMap, fmt};
-use pest::{Parser, error::Error, iterators::Pair};
-use photon_rs::{PhotonImage, native::{open_image, save_image},  transform};
+use pest::{error::Error as PestError, iterators::Pair, Parser};
+use pest_derive::Parser;
+use photon_rs::{
+    multiple::blend,
+    native::{open_image, save_image},
+    transform, PhotonImage,
+};
+use std::{collections::HashMap, fmt};
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
 pub struct IMGParser;
 
 #[derive(Debug, Clone)]
-pub enum FlipType {H, V}
+pub enum FlipType {
+    H,
+    V,
+}
 
 #[derive(Debug, Clone)]
 pub enum AstNode {
@@ -24,9 +27,10 @@ pub enum AstNode {
     SetVar(Box<(AstNode, AstNode)>),
     GetAttr(Box<(AstNode, AstNode)>),
     Flip(FlipType, Box<AstNode>),
-    String(String),
+    Blend(Box<(AstNode, AstNode, AstNode)>),
     Variable(String),
-    Int(i64),
+
+    Value(VariableValue),
 }
 
 fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
@@ -34,69 +38,87 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
         Rule::expr => build_ast_from_expr(pair.into_inner().next().unwrap()),
         Rule::OpenExpr => {
             let mut pair = pair.into_inner();
-            AstNode::Open(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
-        },
-        Rule::OutputExpr => {
-            AstNode::Output(Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())))
-        },
+            AstNode::Open(Box::new((
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+            )))
+        }
+        Rule::OutputExpr => AstNode::Output(Box::new(build_ast_from_expr(
+            pair.into_inner().next().unwrap(),
+        ))),
         Rule::PrintExpr => {
             let mut pair = pair.into_inner();
             AstNode::Print(Box::new(build_ast_from_expr(pair.next().unwrap())))
-        },
+        }
         Rule::ResizeExpr => {
             let mut pair = pair.into_inner();
             AstNode::Resize(Box::new((
                 build_ast_from_expr(pair.next().unwrap()),
-                build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()), build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()),
                 build_ast_from_expr(pair.next().unwrap()),
-                build_ast_from_expr(pair.next().unwrap())))
-            )
-        },
+                build_ast_from_expr(pair.next().unwrap()),
+            )))
+        }
         Rule::SaveExpr => {
             let mut pair = pair.into_inner();
-            AstNode::Save(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
-        },
+            AstNode::Save(Box::new((
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+            )))
+        }
         Rule::SetVarExpr => {
             let mut pair = pair.into_inner();
-            AstNode::SetVar(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
-        },
-        Rule::FlipVExpr => {
-            AstNode::Flip(FlipType::V, Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())))
-        },
-        Rule::FlipHExpr => {
-            AstNode::Flip(FlipType::H, Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())))
-        },
+            AstNode::SetVar(Box::new((
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+            )))
+        }
+        Rule::FlipVExpr => AstNode::Flip(
+            FlipType::V,
+            Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())),
+        ),
+        Rule::FlipHExpr => AstNode::Flip(
+            FlipType::H,
+            Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())),
+        ),
+        Rule::BlendExpr => {
+            let mut pair = pair.into_inner();
+            AstNode::Blend(Box::new((
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+            )))
+        }
         Rule::getattr => {
             let mut pair = pair.into_inner();
             let var = build_ast_from_expr(pair.next().unwrap());
             let attr = pair.next().unwrap().as_span().as_str().to_string();
-            AstNode::GetAttr(Box::new((var, AstNode::String(attr))))
-        },
+            AstNode::GetAttr(Box::new((var, AstNode::Value(VariableValue::String(attr)))))
+        }
         Rule::string => {
             let mut chars = pair.as_span().as_str().chars();
             chars.next();
             chars.next_back();
 
-            AstNode::String(chars.as_str().to_string())
-        },
-        Rule::variable => {
-            AstNode::Variable(pair.as_span().as_str().to_string())
-        },
-        Rule::hex => {
-            AstNode::Int(i64::from_str_radix(pair.as_span().as_str().trim_start_matches("#"), 16).unwrap())
-        },
-        Rule::int => {
-            AstNode::Int(pair.as_span().as_str().parse::<i64>().unwrap())
+            AstNode::Value(VariableValue::String(chars.as_str().to_string()))
         }
-        Rule::value | Rule::_value => {
-            build_ast_from_expr(pair.into_inner().next().unwrap())
-        },
-        unknown => {panic!("{:?}", unknown)}
+        Rule::variable => AstNode::Variable(pair.as_span().as_str().to_string()),
+        Rule::hex => AstNode::Value(VariableValue::Integer(
+            i64::from_str_radix(pair.as_span().as_str().trim_start_matches("#"), 16).unwrap(),
+        )),
+        Rule::int => AstNode::Value(VariableValue::Integer(
+            pair.as_span().as_str().parse::<i64>().unwrap(),
+        )),
+        Rule::value | Rule::_value => build_ast_from_expr(pair.into_inner().next().unwrap()),
+        unknown => {
+            panic!("{:?}", unknown)
+        }
     }
 }
 
-pub fn parse(code: &str) -> Result<Vec<AstNode>, Error<Rule>> {
-    let pairs =  IMGParser::parse(Rule::program, code)?;
+pub fn parse(code: &str) -> Result<Vec<AstNode>, PestError<Rule>> {
+    let pairs = IMGParser::parse(Rule::program, code)?;
     let mut ast = vec![];
 
     for pair in pairs {
@@ -106,7 +128,7 @@ pub fn parse(code: &str) -> Result<Vec<AstNode>, Error<Rule>> {
             }
             _ => {}
         }
-    };
+    }
     Ok(ast)
 }
 
@@ -117,9 +139,9 @@ pub struct Image {
 }
 
 impl Image {
-    fn new(name: String) -> Self {
-        let image = open_image(name.as_str()).expect(format!("No image found called {}", name).as_str());
-        Image {image, name}
+    fn new(name: String) -> RuntimeResult<Self> {
+        let image = open_image(name.as_str()).map_err(|_| Error::NoFileFound(name.clone()))?;
+        Ok(Image { image, name })
     }
 }
 
@@ -133,21 +155,19 @@ impl fmt::Display for Image {
 pub enum VariableValue {
     String(String),
     Integer(i64),
-    Image(Image)
+    Image(Image),
 }
 
 impl VariableValue {
-    fn get_attr(&self, name: String) -> VariableValue {
+    fn get_attr(&self, name: &String) -> RuntimeResult<VariableValue> {
         match self {
-            VariableValue::String(_) => panic!("Cant get attribute on string"),
-            VariableValue::Integer(_) => panic!("Cant get attribute on integer"),
-            VariableValue::Image(image) => {
-                match name.as_str() {
-                    "width" => VariableValue::Integer(image.image.get_width() as i64),
-                    "height" => VariableValue::Integer(image.image.get_height() as i64),
-                    _ => panic!("No attribute on image called '{}'", name)
-                }
-            }
+            VariableValue::String(_) => Err(Error::NoAttribute("string".into(), name.clone())),
+            VariableValue::Integer(_) => Err(Error::NoAttribute("integer".into(), name.clone())),
+            VariableValue::Image(image) => match name.as_str() {
+                "width" => Ok(VariableValue::Integer(image.image.get_width() as i64)),
+                "height" => Ok(VariableValue::Integer(image.image.get_height() as i64)),
+                _ => Err(Error::NoAttribute("image".into(), name.clone())),
+            },
         }
     }
 }
@@ -162,150 +182,199 @@ impl fmt::Display for VariableValue {
     }
 }
 
-fn expect_string(value: VariableValue) -> String {
+fn expect_string(value: &VariableValue) -> RuntimeResult<&str> {
     match value {
-        VariableValue::String(v) => v.to_string(),
-        _ => panic!("Expected string")
+        VariableValue::String(v) => Ok(v),
+        _ => Err(Error::InvalidArgType(ArgType::String)),
     }
 }
 
-fn expect_integer(value: VariableValue) -> i64 {
+fn expect_integer(value: &VariableValue) -> RuntimeResult<i64> {
     match value {
-        VariableValue::Integer(v) => v,
-        _ => panic!("Expected integer")
+        VariableValue::Integer(v) => Ok(*v),
+        _ => Err(Error::InvalidArgType(ArgType::Integer)),
     }
 }
 
-fn expect_image(value: VariableValue) -> Image {
+fn expect_image(value: VariableValue) -> RuntimeResult<Image> {
     match value {
-        VariableValue::Image(v) => v,
-        _ => panic!("Expected image")
+        VariableValue::Image(v) => Ok(v),
+        _ => Err(Error::InvalidArgType(ArgType::Image)),
     }
 }
 
-fn get_variable_name(node: AstNode) -> String {
+fn get_variable_name(node: &AstNode) -> RuntimeResult<&str> {
     match node {
-        AstNode::Variable(name) => name,
-        _ => panic!("Expected variable")
+        AstNode::Variable(name) => Ok(name),
+        _ => Err(Error::ExpectedVariable),
     }
 }
 
 pub struct Code {
     pub ast: Vec<AstNode>,
-    pub variables: HashMap<String, VariableValue>
+    pub variables: HashMap<String, VariableValue>,
 }
 
-pub type CodeResult = Result<Code, Error<Rule>>;
+pub type CodeResult = Result<Code, PestError<Rule>>;
+pub type RuntimeResult<T> = Result<T, Error>;
+
+#[derive(Clone, Debug)]
+pub enum ArgType {
+    Image,
+    Integer,
+    String,
+}
+
+#[derive(Clone, Debug)]
+pub enum Error {
+    MissingVariable(String),
+    InvalidArgType(ArgType),
+    InvalidFilter(String),
+    NoAttribute(String, String),
+    NoFileFound(String),
+    ExpectedVariable,
+}
 
 impl Code {
     pub fn compile(code: &str) -> CodeResult {
         let nodes = parse(code)?;
         Ok(Code {
             ast: nodes,
-            variables: HashMap::new()
+            variables: HashMap::new(),
         })
     }
 
-    fn get_content(&self, node: AstNode) -> Cow<VariableValue> {
+    fn get_content(&self, node: &AstNode) -> RuntimeResult<VariableValue> {
         match node {
-            AstNode::Int(v) => Cow::Owned(VariableValue::Integer(v)),
-            AstNode::String(v) => Cow::Owned(VariableValue::String(v)),
-            AstNode::Variable(name) => Cow::Borrowed(self.variables.get(&name).expect(format!("No variable found called {}", name).as_str())),
+            AstNode::Value(value) => Ok(value.clone()),
+            AstNode::Variable(name) => Ok(self
+                .variables
+                .get(name)
+                .ok_or_else(|| Error::MissingVariable(name.clone()))?
+                .clone()),
             AstNode::GetAttr(args) => {
-                let (varnode, attrnode) = *args;
-                let attrname = expect_string(self.get_content(attrnode).into_owned());
-                let varname = get_variable_name(varnode);
-                let variable = self.variables.get(&varname).expect(format!("No variable found called {}", varname).as_str());
-                let attr = variable.get_attr(attrname);
+                let (varnode, attrnode) = &**args;
+                let attrname = &match self.get_content(attrnode)? {
+                    VariableValue::String(s) => s,
+                    _ => unreachable!(),
+                };
+                let varname = get_variable_name(varnode)?;
+                let variable = self
+                    .variables
+                    .get(varname)
+                    .ok_or_else(|| Error::MissingVariable(varname.into()))?;
+                let attr = variable.get_attr(attrname)?;
 
-                Cow::Owned(attr)
+                Ok(attr)
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
-    fn pop_variable(&mut self, node: AstNode) -> (Cow<'static, String>, Cow<'static, VariableValue>) {
+    fn pop_variable(&mut self, node: AstNode) -> RuntimeResult<(String, VariableValue)> {
         match node {
             AstNode::Variable(name) => {
-                let var: VariableValue = self.variables.remove(&name).expect(format!("No variable found called {}", name).as_str());
-                (Cow::Owned(name), Cow::Owned(var))
-            },
-            _ => panic!("Expected variable")
+                let var: VariableValue = self
+                    .variables
+                    .remove(&name)
+                    .ok_or_else(|| Error::MissingVariable(name.clone()))?;
+                Ok((name, var))
+            }
+            _ => panic!("Expected variable"),
         }
     }
 
-    pub fn run(mut self) -> Option<Image> {
-        for node in self.ast.clone().into_iter() {
+    pub fn run(mut self) -> RuntimeResult<Option<Image>> {
+        // Could represent this as a `Vec<Statement>` if only the top layer can contain commands
+        for node in self.ast.clone() {
             match node {
                 AstNode::Open(args) => {
-                    let (file, var) = *args;
-                    let filename = expect_string(self.get_content(file).into_owned());
-                    let variable = get_variable_name(var);
-                    let image = Image::new(filename);
+                    let (file, var) = &*args;
+                    let temp = self.get_content(file)?;
+                    let filename = expect_string(&temp)?;
+                    let variable = get_variable_name(var)?;
+                    let image = Image::new(filename.to_string())?;
                     let value = VariableValue::Image(image);
 
-                    self.variables.insert(variable, value);
-                },
+                    self.variables.insert(variable.to_owned(), value);
+                }
                 AstNode::Print(valuebox) => {
-                    let value = self.get_content(*valuebox).into_owned();
+                    let value = self.get_content(&*valuebox)?;
                     println!("{}", value);
-                },
+                }
                 AstNode::Output(outputbox) => {
-                    let file = expect_image(self.get_content(*outputbox).into_owned());
-                    return Some(file);
-                },
+                    let file = expect_image(self.get_content(&*outputbox)?)?;
+                    return Ok(Some(file));
+                }
                 AstNode::Resize(args) => {
-                    let (input, w, h, filternode, outputnode) = *args;
-                    let image = expect_image(self.get_content(input).into_owned());
-                    let filter = match expect_string(self.get_content(filternode).into_owned()).as_str() {
-                        "nearest" => transform::SamplingFilter::Nearest,
-                        "triangle" => transform::SamplingFilter::Triangle,
-                        "catmullrom" => transform::SamplingFilter::CatmullRom,
-                        "gaussian" => transform::SamplingFilter::Gaussian,
-                        "lanczons" => transform::SamplingFilter::Lanczos3,
-                        _ => panic!("Invalid filter")
+                    let (input, w, h, filternode, outputnode) = &*args;
+                    let image = expect_image(self.get_content(input)?)?;
+                    let filter = match expect_string(&self.get_content(filternode)?)? {
+                        "nearest" => Ok(transform::SamplingFilter::Nearest),
+                        "triangle" => Ok(transform::SamplingFilter::Triangle),
+                        "catmullrom" => Ok(transform::SamplingFilter::CatmullRom),
+                        "gaussian" => Ok(transform::SamplingFilter::Gaussian),
+                        "lanczons" => Ok(transform::SamplingFilter::Lanczos3),
+                        s => Err(Error::InvalidFilter(s.into())),
+                    }?;
+
+                    let width = expect_integer(&self.get_content(w)?)? as u32;
+                    let height = expect_integer(&self.get_content(h)?)? as u32;
+                    let outputname = get_variable_name(outputnode)?;
+
+                    let newimage = Image {
+                        name: image.name,
+                        image: transform::resize(&image.image, width, height, filter),
                     };
-
-                    let width = expect_integer(self.get_content(w).into_owned()) as u32;
-                    let height = expect_integer(self.get_content(h).into_owned()) as u32;
-                    let outputname = get_variable_name(outputnode);
-
-                    let newimage = Image {name: image.name, image: transform::resize(&image.image, width, height, filter)};
-                    self.variables.insert(outputname, VariableValue::Image(newimage));
-                },
+                    self.variables
+                        .insert(outputname.to_owned(), VariableValue::Image(newimage));
+                }
                 AstNode::SetVar(args) => {
-                    let (varnode, valuenode) = *args;
-                    let name = get_variable_name(varnode);
-                    let value = self.get_content(valuenode).into_owned();
-                    
-                    self.variables.insert(name, value);
+                    let (varnode, valuenode) = &*args;
+                    let name = get_variable_name(varnode)?;
+                    let value = self.get_content(valuenode)?;
+
+                    self.variables.insert(name.to_owned(), value);
                 }
                 AstNode::Save(args) => {
-                    let (imagenode, filenamenode) = *args;
-                    let image = expect_image(self.get_content(imagenode).into_owned());
-                    let outputname = expect_string(self.get_content(filenamenode).into_owned());
+                    let (imagenode, filenamenode) = &*args;
+                    let image = expect_image(self.get_content(imagenode)?)?;
+                    let temp = self.get_content(filenamenode)?;
+                    let outputname = expect_string(&temp)?;
 
                     save_image(image.image, &outputname);
-                },
+                }
                 AstNode::Flip(fliptype, imagebox) => {
-                    let (varname, var) = self.pop_variable(*imagebox);
+                    let (varname, var) = self.pop_variable((*imagebox).clone())?;
 
-                    let mut image = expect_image(var.into_owned());
+                    let mut image = expect_image(var)?;
 
                     match fliptype {
                         FlipType::H => transform::fliph(&mut image.image),
                         FlipType::V => transform::flipv(&mut image.image),
                     }
 
-                    self.variables.insert(varname.into_owned(), VariableValue::Image(image));
-                },
-                _ => unreachable!()
+                    self.variables.insert(varname, VariableValue::Image(image));
+                }
+                AstNode::Blend(args) => {
+                    let (base, overlay, modenode) = &*args;
+                    let (name, base_image_var) = self.pop_variable((*base).clone())?;
+                    let mut base_image = expect_image(base_image_var)?;
+                    let overlay_image = expect_image(self.get_content(overlay)?)?;
+                    let temp = self.get_content(modenode)?;
+                    let mode = expect_string(&temp)?;
+
+                    blend(&mut base_image.image, &overlay_image.image, mode);
+                    self.variables
+                        .insert(name, VariableValue::Image(base_image));
+                }
+                _ => unreachable!(),
             }
-        };
-        None
+        }
+        Ok(None)
     }
 }
 
 pub fn compile(code: &str) -> CodeResult {
-	Code::compile(code)
+    Code::compile(code)
 }

@@ -1,7 +1,7 @@
 string = ${ "\"" ~ (ASCII_ALPHANUMERIC | "." | "/")* ~ "\"" }
 
-variable = ${ ASCII_ALPHA+ ~ ASCII_DIGIT* }
-hex = ${"#" ~ ASCII_HEX_DIGIT+}
+variable = ${ ASCII_ALPHA+ }
+hex = ${ "#" ~ ASCII_HEX_DIGIT+}
 int = ${ ASCII_DIGIT+ }
 attr = ${ ASCII_ALPHA+ ~ ASCII_DIGIT* }
 
@@ -18,19 +18,20 @@ power = { _value ~ "**" ~ _value }
 
 value = ${ _value | add | minus | divide | intdivide | multiply | power }
 
-getattr = ${variable ~ "." ~ attr}
+getattr = ${ variable ~ "." ~ attr }
 
 WHITESPACE = _{ (" " | "\t") }
 
-OpenExpr = {"OPEN" ~ string ~ variable}
-OutputExpr = {"OUTPUT" ~ variable}
-PrintExpr = {"PRINT" ~ value}
-SaveExpr = {"SAVE" ~ variable ~ string}
-SetVarExpr = {"SETVAR" ~ variable ~ value}
+OpenExpr = { "OPEN" ~ string ~ variable }
+OutputExpr = { "OUTPUT" ~ variable }
+PrintExpr = { "PRINT" ~ value }
+SaveExpr = { "SAVE" ~ variable ~ string }
+SetVarExpr = { "SETVAR" ~ variable ~ value }
 
-ResizeExpr = {"RESIZE" ~ variable ~ value ~ value ~ string ~ variable}  // RESIZE input 500 500 "nearest" output
-FlipHExpr = {"FLIPH" ~ variable }
-FlipVExpr = {"FLIPV" ~ variable }
+ResizeExpr = { "RESIZE" ~ variable ~ value ~ value ~ string ~ variable }  // RESIZE input 500 500 "nearest" output
+FlipHExpr = { "FLIPH" ~ variable }
+FlipVExpr = { "FLIPV" ~ variable }
+BlendExpr = { "BLEND" ~ variable ~ variable ~ string}
 
 expr = { OpenExpr | OutputExpr | PrintExpr | ResizeExpr | SaveExpr | SetVarExpr | FlipHExpr | FlipVExpr }
 
