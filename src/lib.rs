@@ -206,21 +206,31 @@ impl Code {
         })
     }
 
-    pub fn get_content(&self, node: AstNode) -> Option<Cow<VariableValue>> {
+    fn get_content(&self, node: AstNode) -> Cow<VariableValue> {
         match node {
-            AstNode::Int(v) => Some(Cow::Owned(VariableValue::Integer(v))),
-            AstNode::String(v) => Some(Cow::Owned(VariableValue::String(v))),
-            AstNode::Variable(name) => self.variables.get(&name).map(Cow::Borrowed),
+            AstNode::Int(v) => Cow::Owned(VariableValue::Integer(v)),
+            AstNode::String(v) => Cow::Owned(VariableValue::String(v)),
+            AstNode::Variable(name) => Cow::Borrowed(self.variables.get(&name).expect(format!("No variable found called {}", name).as_str())),
             AstNode::GetAttr(args) => {
                 let (varnode, attrnode) = *args;
-                let attrname = expect_string(self.get_content(attrnode).unwrap().into_owned());
+                let attrname = expect_string(self.get_content(attrnode).into_owned());
                 let varname = get_variable_name(varnode);
                 let variable = self.variables.get(&varname).expect(format!("No variable found called {}", varname).as_str());
                 let attr = variable.get_attr(attrname);
 
-                Some(Cow::Owned(attr))
+                Cow::Owned(attr)
             }
             _ => unreachable!()
+        }
+    }
+
+    fn pop_variable(&mut self, node: AstNode) -> (Cow<'static, String>, Cow<'static, VariableValue>) {
+        match node {
+            AstNode::Variable(name) => {
+                let var: VariableValue = self.variables.remove(&name).expect(format!("No variable found called {}", name).as_str());
+                (Cow::Owned(name), Cow::Owned(var))
+            },
+            _ => panic!("Expected variable")
         }
     }
 
@@ -229,7 +239,7 @@ impl Code {
             match node {
                 AstNode::Open(args) => {
                     let (file, var) = *args;
-                    let filename = expect_string(self.get_content(file).unwrap().into_owned());
+                    let filename = expect_string(self.get_content(file).into_owned());
                     let variable = get_variable_name(var);
                     let image = Image::new(filename);
                     let value = VariableValue::Image(image);
@@ -237,17 +247,17 @@ impl Code {
                     self.variables.insert(variable, value);
                 },
                 AstNode::Print(valuebox) => {
-                    let value = self.get_content(*valuebox).unwrap().into_owned();
+                    let value = self.get_content(*valuebox).into_owned();
                     println!("{}", value);
                 },
                 AstNode::Output(outputbox) => {
-                    let file = expect_image(self.get_content(*outputbox).unwrap().into_owned());
+                    let file = expect_image(self.get_content(*outputbox).into_owned());
                     return Some(file);
                 },
                 AstNode::Resize(args) => {
                     let (input, w, h, filternode, outputnode) = *args;
-                    let image = expect_image(self.get_content(input).unwrap().into_owned());
-                    let filter = match expect_string(self.get_content(filternode).unwrap().into_owned()).as_str() {
+                    let image = expect_image(self.get_content(input).into_owned());
+                    let filter = match expect_string(self.get_content(filternode).into_owned()).as_str() {
                         "nearest" => transform::SamplingFilter::Nearest,
                         "triangle" => transform::SamplingFilter::Triangle,
                         "catmullrom" => transform::SamplingFilter::CatmullRom,
@@ -256,8 +266,8 @@ impl Code {
                         _ => panic!("Invalid filter")
                     };
 
-                    let width = expect_integer(self.get_content(w).unwrap().into_owned()) as u32;
-                    let height = expect_integer(self.get_content(h).unwrap().into_owned()) as u32;
+                    let width = expect_integer(self.get_content(w).into_owned()) as u32;
+                    let height = expect_integer(self.get_content(h).into_owned()) as u32;
                     let outputname = get_variable_name(outputnode);
 
                     let newimage = Image {name: image.name, image: transform::resize(&image.image, width, height, filter)};
@@ -266,34 +276,30 @@ impl Code {
                 AstNode::SetVar(args) => {
                     let (varnode, valuenode) = *args;
                     let name = get_variable_name(varnode);
-                    let value = self.get_content(valuenode).unwrap().into_owned();
+                    let value = self.get_content(valuenode).into_owned();
                     
                     self.variables.insert(name, value);
                 }
                 AstNode::Save(args) => {
                     let (imagenode, filenamenode) = *args;
-                    let image = expect_image(self.get_content(imagenode).unwrap().into_owned());
-                    let outputname = expect_string(self.get_content(filenamenode).unwrap().into_owned());
+                    let image = expect_image(self.get_content(imagenode).into_owned());
+                    let outputname = expect_string(self.get_content(filenamenode).into_owned());
 
                     save_image(image.image, &outputname);
                 },
                 AstNode::Flip(fliptype, imagebox) => {
-                    // cant use get_content because i need the var name not the var content as i use hasmap.remove not hashmap.get here
-                    
-                    let varname = match *imagebox {
-                        AstNode::Variable(name) => name,
-                        _ => panic!("Expected variable")
-                    };
-                    let mut image = expect_image(self.variables.remove(&varname).expect(format!("No variable found").as_str()));
+                    let (varname, var) = self.pop_variable(*imagebox);
+
+                    let mut image = expect_image(var.into_owned());
 
                     match fliptype {
                         FlipType::H => transform::fliph(&mut image.image),
                         FlipType::V => transform::flipv(&mut image.image),
                     }
 
-                    self.variables.insert(varname, VariableValue::Image(image));
+                    self.variables.insert(varname.into_owned(), VariableValue::Image(image));
                 },
-                _ => {}
+                _ => unreachable!()
             }
         };
         None
