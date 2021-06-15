@@ -18,6 +18,8 @@ pub enum AstNode {
     Resize(Box<(AstNode, AstNode, AstNode, AstNode, AstNode)>),
     Output(Box<AstNode>),
     Save(Box<(AstNode, AstNode)>),
+    SetVar(Box<(AstNode, AstNode)>),
+    GetAttr(Box<(AstNode, AstNode)>),
     String(String),
     Variable(String),
     Int(i64),
@@ -49,7 +51,17 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
         Rule::SaveExpr => {
             let mut pair = pair.into_inner();
             AstNode::Save(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
-        }
+        },
+        Rule::SetVarExpr => {
+            let mut pair = pair.into_inner();
+            AstNode::SetVar(Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))))
+        },
+        Rule::getattr => {
+            let mut pair = pair.into_inner();
+            let var = build_ast_from_expr(pair.next().unwrap());
+            let attr = pair.next().unwrap().as_span().as_str().to_string();
+            AstNode::GetAttr(Box::new((var, AstNode::String(attr))))
+        },
         Rule::string => {
             let mut chars = pair.as_span().as_str().chars();
             chars.next();
@@ -101,7 +113,7 @@ pub struct Image {
 impl Image {
     fn new(name: String) -> Self {
         let image = open_image(&*name).expect(&*format!("No image found called {}", name));
-        Image {image, name }
+        Image {image, name}
     }
 }
 
@@ -111,12 +123,27 @@ impl fmt::Display for Image {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub enum VariableValue {
     String(String),
     Integer(i64),
     Image(Image)
+}
+
+impl VariableValue {
+    fn get_attr(&self, name: String) -> VariableValue {
+        match self {
+            VariableValue::String(_) => panic!("Cant get attribute on string"),
+            VariableValue::Integer(_) => panic!("Cant get attribute on integer"),
+            VariableValue::Image(image) => {
+                match name.as_str() {
+                    "width" => VariableValue::Integer(image.image.get_width() as i64),
+                    "height" => VariableValue::Integer(image.image.get_height() as i64),
+                    _ => panic!("No attribute on image called '{}'", name)
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Display for VariableValue {
@@ -174,7 +201,7 @@ impl Code {
                     variables: HashMap::new()
                 })
             },
-            Err(err) => Err(err)
+            Err(err) => panic!("{}", err)
         }
     }
 
@@ -183,6 +210,15 @@ impl Code {
             AstNode::Int(v) => Some(Cow::Owned(VariableValue::Integer(v))),
             AstNode::String(v) => Some(Cow::Owned(VariableValue::String(v))),
             AstNode::Variable(name) => self.variables.get(&name).map(Cow::Borrowed),
+            AstNode::GetAttr(args) => {
+                let (varnode, attrnode) = *args;
+                let attrname = expect_string(self.get_content(attrnode).unwrap().into_owned());
+                let varname = get_variable_name(varnode);
+                let variable = self.variables.get(&varname).expect(format!("No variable found called {}", varname).as_str());
+                let attr = variable.get_attr(attrname);
+
+                Some(Cow::Owned(attr))
+            }
             _ => panic!("??")
         }
     }
@@ -223,12 +259,16 @@ impl Code {
                     let height = expect_integer(self.get_content(h).unwrap().into_owned()) as u32;
                     let outputname = get_variable_name(outputnode);
 
-                    let newimage = Image {
-                        image: transform::resize(&image.image, width, height, filter),
-                        name: image.name
-                    };
+                    let newimage = Image {name: image.name, image: transform::resize(&image.image, width, height, filter)};
                     self.variables.insert(outputname, VariableValue::Image(newimage));
                 },
+                AstNode::SetVar(args) => {
+                    let (varnode, valuenode) = *args;
+                    let name = get_variable_name(varnode);
+                    let value = self.get_content(valuenode).unwrap().into_owned();
+                    
+                    self.variables.insert(name, value);
+                }
                 AstNode::Save(args) => {
                     let (imagenode, filenamenode) = *args;
                     let image = expect_image(self.get_content(imagenode).unwrap().into_owned());
