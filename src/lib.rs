@@ -235,6 +235,19 @@ pub enum Error {
     ExpectedVariable,
 }
 
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::MissingVariable(var) => write!(f, "Missing Variable \"{}\"", var),
+            Error::InvalidArgType(_type) => write!(f, "Invalid Argument Type \"{:?}\"", _type),
+            Error::InvalidFilter(filter) => write!(f, "Invalid Filter \"{}\"", filter),
+            Error::NoAttribute(_type, attr) => write!(f, "No Attribute On \"{}\" Called \"{}\"", _type, attr),
+            Error::NoFileFound(filename) => write!(f, "No file Called \"{}\"", filename),
+            Error::ExpectedVariable => write!(f, "Expected Variable"),
+        }
+    }
+}
+
 impl Code {
     pub fn compile(code: &str) -> CodeResult {
         let nodes = parse(code)?;
@@ -280,7 +293,7 @@ impl Code {
                     .ok_or_else(|| Error::MissingVariable(name.clone()))?;
                 Ok((name, var))
             }
-            _ => panic!("Expected variable"),
+            _ => Err(Error::ExpectedVariable),
         }
     }
 
