@@ -13,5 +13,4 @@ path = "src/lib.rs"
 [dependencies]
 pest = "2.0"
 pest_derive = "2.0"
-photon-rs = "0.3.1"
-clap = "2.33.3"
+image = "0.23.14"

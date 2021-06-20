@@ -1,6 +1,5 @@
 use pest::error::Error as PestError;
-use photon_rs::{multiple::blend, native::save_image, transform};
-
+use image::{imageops::FilterType};
 use std::{collections::HashMap, fmt};
 
 mod ast;
@@ -47,13 +46,15 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::MissingVariable(var) => write!(f, "Missing Variable \"{}\"", var),
-            Error::InvalidArgType(_type) => write!(f, "Invalid Argument Type \"{:?}\"", _type),
+            Error::InvalidArgType(expected) => write!(f, "Invalid Argument Type, Expected {:?}", expected),
             Error::InvalidFilter(filter) => write!(f, "Invalid Filter \"{}\"", filter),
             Error::NoAttribute(_type, attr) => {
                 write!(f, "No Attribute On \"{}\" Called \"{}\"", _type, attr)
             }
             Error::NoFileFound(filename) => write!(f, "No file Called \"{}\"", filename),
             Error::ExpectedVariable => write!(f, "Expected Variable"),
+            Error::ErrorReadingFile(filename) => write!(f, "Error Reading File Called \"{}\"", filename),
+            Error::ErrorSavingFile(filename) => write!(f, "Error Writing To File Called \"{}\"", filename),
         }
     }
 }
@@ -94,6 +95,7 @@ impl Code {
         }
     }
 
+    #[allow(dead_code)]
     fn pop_variable(&mut self, node: AstNode) -> RuntimeResult<(String, VariableValue)> {
         match node {
             AstNode::Variable(name) => {
@@ -108,7 +110,6 @@ impl Code {
     }
 
     pub fn run(mut self) -> RuntimeResult<Option<Image>> {
-        // Could represent this as a `Vec<Statement>` if only the top layer can contain commands
         for node in self.ast.clone() {
             match node {
                 AstNode::Open(args) => {
@@ -133,11 +134,11 @@ impl Code {
                     let (input, w, h, filternode, outputnode) = &*args;
                     let image = expect_image(self.get_content(input)?)?;
                     let filter = match expect_string(&self.get_content(filternode)?)? {
-                        "nearest" => Ok(transform::SamplingFilter::Nearest),
-                        "triangle" => Ok(transform::SamplingFilter::Triangle),
-                        "catmullrom" => Ok(transform::SamplingFilter::CatmullRom),
-                        "gaussian" => Ok(transform::SamplingFilter::Gaussian),
-                        "lanczons" => Ok(transform::SamplingFilter::Lanczos3),
+                        "nearest" => Ok(FilterType::Nearest),
+                        "triangle" => Ok(FilterType::Triangle),
+                        "catmullrom" => Ok(FilterType::CatmullRom),
+                        "gaussian" => Ok(FilterType::Gaussian),
+                        "lanczons" => Ok(FilterType::Lanczos3),
                         s => Err(Error::InvalidFilter(s.into())),
                     }?;
 
@@ -147,7 +148,7 @@ impl Code {
 
                     let newimage = Image {
                         name: image.name,
-                        image: transform::resize(&image.image, width, height, filter),
+                        image: image.image.resize(width, height, filter),
                     };
                     self.variables
                         .insert(outputname.to_owned(), VariableValue::Image(newimage));
@@ -165,31 +166,29 @@ impl Code {
                     let temp = self.get_content(filenamenode)?;
                     let outputname = expect_string(&temp)?;
 
-                    save_image(image.image, &outputname);
+                    image.image.save(&outputname).map_err(|_| Error::ErrorSavingFile(outputname.into()))?;
                 }
-                AstNode::Flip(fliptype, imagebox) => {
-                    let (varname, var) = self.pop_variable((*imagebox).clone())?;
+                AstNode::Flip(fliptype, args) => {
+                    let (imagenode, outputnode) = *args;
+                    let mut image = expect_image(self.get_content(&imagenode)?)?;
+                    let output = get_variable_name(&outputnode)?.into();
 
-                    let mut image = expect_image(var)?;
+                    image.image = match fliptype {
+                        FlipType::H => image.image.fliph(),
+                        FlipType::V => image.image.flipv()
+                    };
 
-                    match fliptype {
-                        FlipType::H => transform::fliph(&mut image.image),
-                        FlipType::V => transform::flipv(&mut image.image),
-                    }
+                    self.variables.insert(output, VariableValue::Image(image));
+                },
+                AstNode::Blur(args) => {
+                    let (imagenode, sigmanode, outputnode) = *args;
+                    let mut image = expect_image(self.get_content(&imagenode)?)?;
+                    let output = get_variable_name(&outputnode)?.into();
+                    let sigma = expect_integer(&self.get_content(&sigmanode)?)?;
+                    
+                    image.image = image.image.blur(sigma as f32);
 
-                    self.variables.insert(varname, VariableValue::Image(image));
-                }
-                AstNode::Blend(args) => {
-                    let (base, overlay, modenode) = &*args;
-                    let (name, base_image_var) = self.pop_variable((*base).clone())?;
-                    let mut base_image = expect_image(base_image_var)?;
-                    let overlay_image = expect_image(self.get_content(overlay)?)?;
-                    let temp = self.get_content(modenode)?;
-                    let mode = expect_string(&temp)?;
-
-                    blend(&mut base_image.image, &overlay_image.image, mode);
-                    self.variables
-                        .insert(name, VariableValue::Image(base_image));
+                    self.variables.insert(output, VariableValue::Image(image));
                 }
                 _ => unreachable!(),
             }

@@ -1,15 +1,15 @@
-use photon_rs::{native::open_image, PhotonImage};
 use std::fmt;
+use image::{DynamicImage, GenericImageView, open};
 
 #[derive(Debug, Clone)]
 pub struct Image {
-    pub image: PhotonImage,
+    pub image: DynamicImage,
     pub name: String,
 }
 
 impl Image {
     pub fn new(name: String) -> RuntimeResult<Self> {
-        let image = open_image(name.as_str()).map_err(|_| Error::NoFileFound(name.clone()))?;
+        let image = open(name.as_str()).map_err(|_| Error::NoFileFound(name.clone()))?;
         Ok(Image { image, name })
     }
 }
@@ -33,8 +33,8 @@ impl VariableValue {
             VariableValue::String(_) => Err(Error::NoAttribute("string".into(), name.clone())),
             VariableValue::Integer(_) => Err(Error::NoAttribute("integer".into(), name.clone())),
             VariableValue::Image(image) => match name.as_str() {
-                "width" => Ok(VariableValue::Integer(image.image.get_width() as i64)),
-                "height" => Ok(VariableValue::Integer(image.image.get_height() as i64)),
+                "width" => Ok(VariableValue::Integer(image.image.width() as i64)),
+                "height" => Ok(VariableValue::Integer(image.image.height() as i64)),
                 _ => Err(Error::NoAttribute("image".into(), name.clone())),
             },
         }
@@ -58,6 +58,8 @@ pub enum Error {
     InvalidFilter(String),
     NoAttribute(String, String),
     NoFileFound(String),
+    ErrorReadingFile(String),
+    ErrorSavingFile(String),
     ExpectedVariable,
 }
 

@@ -1,9 +1,9 @@
 use pest::{error::Error as PestError, iterators::Pair};
-use pest_derive::Parser;
+use pest::Parser;
 
 use crate::structs::{FlipType, VariableValue};
 
-#[derive(Parser)]
+#[derive(pest_derive::Parser)]
 #[grammar = "grammar.pest"]
 pub struct IMGParser;
 
@@ -16,8 +16,8 @@ pub enum AstNode {
     Save(Box<(AstNode, AstNode)>),
     SetVar(Box<(AstNode, AstNode)>),
     GetAttr(Box<(AstNode, AstNode)>),
-    Flip(FlipType, Box<AstNode>),
-    Blend(Box<(AstNode, AstNode, AstNode)>),
+    Flip(FlipType, Box<(AstNode, AstNode)>),
+    Blur(Box<(AstNode, AstNode, AstNode)>),
     Variable(String),
 
     Value(VariableValue),
@@ -64,17 +64,23 @@ pub fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
                 build_ast_from_expr(pair.next().unwrap()),
             )))
         }
-        Rule::FlipVExpr => AstNode::Flip(
-            FlipType::V,
-            Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())),
-        ),
-        Rule::FlipHExpr => AstNode::Flip(
-            FlipType::H,
-            Box::new(build_ast_from_expr(pair.into_inner().next().unwrap())),
-        ),
-        Rule::BlendExpr => {
+        Rule::FlipVExpr => {
             let mut pair = pair.into_inner();
-            AstNode::Blend(Box::new((
+            AstNode::Flip(
+                FlipType::V,
+                Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))),
+            )
+        },
+        Rule::FlipHExpr => {
+            let mut pair = pair.into_inner();
+            AstNode::Flip(
+                FlipType::H,
+                Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))),
+            )
+        },
+        Rule::BlurExpr => {
+            let mut pair = pair.into_inner();
+            AstNode::Blur(Box::new((
                 build_ast_from_expr(pair.next().unwrap()),
                 build_ast_from_expr(pair.next().unwrap()),
                 build_ast_from_expr(pair.next().unwrap()),
@@ -102,7 +108,7 @@ pub fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
         )),
         Rule::value | Rule::_value => build_ast_from_expr(pair.into_inner().next().unwrap()),
         unknown => {
-            panic!("{:?}", unknown)
+            panic!(" unhandled op: {:?}", unknown)
         }
     }
 }
