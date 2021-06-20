@@ -1,5 +1,5 @@
+use image::imageops::FilterType;
 use pest::error::Error as PestError;
-use image::{imageops::FilterType};
 use std::{collections::HashMap, fmt};
 
 mod ast;
@@ -46,15 +46,21 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::MissingVariable(var) => write!(f, "Missing Variable \"{}\"", var),
-            Error::InvalidArgType(expected) => write!(f, "Invalid Argument Type, Expected {:?}", expected),
+            Error::InvalidArgType(expected) => {
+                write!(f, "Invalid Argument Type, Expected {:?}", expected)
+            }
             Error::InvalidFilter(filter) => write!(f, "Invalid Filter \"{}\"", filter),
             Error::NoAttribute(_type, attr) => {
                 write!(f, "No Attribute On \"{}\" Called \"{}\"", _type, attr)
             }
             Error::NoFileFound(filename) => write!(f, "No file Called \"{}\"", filename),
             Error::ExpectedVariable => write!(f, "Expected Variable"),
-            Error::ErrorReadingFile(filename) => write!(f, "Error Reading File Called \"{}\"", filename),
-            Error::ErrorSavingFile(filename) => write!(f, "Error Writing To File Called \"{}\"", filename),
+            Error::ErrorReadingFile(filename) => {
+                write!(f, "Error Reading File Called \"{}\"", filename)
+            }
+            Error::ErrorSavingFile(filename) => {
+                write!(f, "Error Writing To File Called \"{}\"", filename)
+            }
         }
     }
 }
@@ -166,7 +172,10 @@ impl Code {
                     let temp = self.get_content(filenamenode)?;
                     let outputname = expect_string(&temp)?;
 
-                    image.image.save(&outputname).map_err(|_| Error::ErrorSavingFile(outputname.into()))?;
+                    image
+                        .image
+                        .save(&outputname)
+                        .map_err(|_| Error::ErrorSavingFile(outputname.into()))?;
                 }
                 AstNode::Flip(fliptype, args) => {
                     let (imagenode, outputnode) = *args;
@@ -175,17 +184,17 @@ impl Code {
 
                     image.image = match fliptype {
                         FlipType::H => image.image.fliph(),
-                        FlipType::V => image.image.flipv()
+                        FlipType::V => image.image.flipv(),
                     };
 
                     self.variables.insert(output, VariableValue::Image(image));
-                },
+                }
                 AstNode::Blur(args) => {
                     let (imagenode, sigmanode, outputnode) = *args;
                     let mut image = expect_image(self.get_content(&imagenode)?)?;
                     let output = get_variable_name(&outputnode)?.into();
                     let sigma = expect_integer(&self.get_content(&sigmanode)?)?;
-                    
+
                     image.image = image.image.blur(sigma as f32);
 
                     self.variables.insert(output, VariableValue::Image(image));

@@ -1,5 +1,5 @@
-use pest::{error::Error as PestError, iterators::Pair};
 use pest::Parser;
+use pest::{error::Error as PestError, iterators::Pair};
 
 use crate::structs::{FlipType, VariableValue};
 
@@ -68,16 +68,22 @@ pub fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
             let mut pair = pair.into_inner();
             AstNode::Flip(
                 FlipType::V,
-                Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))),
+                Box::new((
+                    build_ast_from_expr(pair.next().unwrap()),
+                    build_ast_from_expr(pair.next().unwrap()),
+                )),
             )
-        },
+        }
         Rule::FlipHExpr => {
             let mut pair = pair.into_inner();
             AstNode::Flip(
                 FlipType::H,
-                Box::new((build_ast_from_expr(pair.next().unwrap()), build_ast_from_expr(pair.next().unwrap()))),
+                Box::new((
+                    build_ast_from_expr(pair.next().unwrap()),
+                    build_ast_from_expr(pair.next().unwrap()),
+                )),
             )
-        },
+        }
         Rule::BlurExpr => {
             let mut pair = pair.into_inner();
             AstNode::Blur(Box::new((

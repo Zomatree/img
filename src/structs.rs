@@ -1,5 +1,5 @@
+use image::{open, DynamicImage, GenericImageView};
 use std::fmt;
-use image::{DynamicImage, GenericImageView, open};
 
 #[derive(Debug, Clone)]
 pub struct Image {
