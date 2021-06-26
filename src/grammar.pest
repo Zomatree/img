@@ -32,8 +32,9 @@ ResizeExpr = { "RESIZE" ~ variable ~ value ~ value ~ string ~ variable }  // RES
 FlipHExpr = { "FLIPH" ~ variable ~ variable}
 FlipVExpr = { "FLIPV" ~ variable ~ variable}
 BlurExpr = { "BLUR" ~ variable ~ value ~ variable}
+OverlayExpr = { "OVERLAY" ~ variable ~ variable ~ value ~ value ~ variable}  // OVELAY top bottom 500 500 output
 
-expr = { OpenExpr | OutputExpr | PrintExpr | ResizeExpr | SaveExpr | SetVarExpr | FlipHExpr | FlipVExpr | BlurExpr}
+expr = { OpenExpr | OutputExpr | PrintExpr | ResizeExpr | SaveExpr | SetVarExpr | FlipHExpr | FlipVExpr | BlurExpr | OverlayExpr }
 
 stmt = _{ expr }
 program = _{ SOI ~ "\n"* ~ (stmt ~ "\n"+) * ~ stmt? ~ EOI }

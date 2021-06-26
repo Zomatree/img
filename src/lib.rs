@@ -1,4 +1,4 @@
-use image::imageops::FilterType;
+use image::imageops;
 use pest::error::Error as PestError;
 use std::{collections::HashMap, fmt};
 
@@ -140,11 +140,11 @@ impl Code {
                     let (input, w, h, filternode, outputnode) = &*args;
                     let image = expect_image(self.get_content(input)?)?;
                     let filter = match expect_string(&self.get_content(filternode)?)? {
-                        "nearest" => Ok(FilterType::Nearest),
-                        "triangle" => Ok(FilterType::Triangle),
-                        "catmullrom" => Ok(FilterType::CatmullRom),
-                        "gaussian" => Ok(FilterType::Gaussian),
-                        "lanczons" => Ok(FilterType::Lanczos3),
+                        "nearest" => Ok(imageops::FilterType::Nearest),
+                        "triangle" => Ok(imageops::FilterType::Triangle),
+                        "catmullrom" => Ok(imageops::FilterType::CatmullRom),
+                        "gaussian" => Ok(imageops::FilterType::Gaussian),
+                        "lanczons" => Ok(imageops::FilterType::Lanczos3),
                         s => Err(Error::InvalidFilter(s.into())),
                     }?;
 
@@ -198,6 +198,18 @@ impl Code {
                     image.image = image.image.blur(sigma as f32);
 
                     self.variables.insert(output, VariableValue::Image(image));
+                }
+                AstNode::Overlay(args) => {
+                    let (bottomnode, topnode, xnode, ynode, outputnode) = *args;
+                    let mut bottom = expect_image(self.get_content(&bottomnode)?)?;
+                    let top = expect_image(self.get_content(&topnode)?)?;
+                    let x = expect_integer(&self.get_content(&xnode)?)? as u32;
+                    let y = expect_integer(&self.get_content(&ynode)?)? as u32;
+                    let output = get_variable_name(&outputnode)?.into();
+
+                    imageops::overlay(&mut bottom.image, &top.image, x, y);
+
+                    self.variables.insert(output, VariableValue::Image(bottom));
                 }
                 _ => unreachable!(),
             }

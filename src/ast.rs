@@ -18,8 +18,9 @@ pub enum AstNode {
     GetAttr(Box<(AstNode, AstNode)>),
     Flip(FlipType, Box<(AstNode, AstNode)>),
     Blur(Box<(AstNode, AstNode, AstNode)>),
+    Overlay(Box<(AstNode, AstNode, AstNode, AstNode, AstNode)>),
+    
     Variable(String),
-
     Value(VariableValue),
 }
 
@@ -89,6 +90,16 @@ pub fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
             AstNode::Blur(Box::new((
                 build_ast_from_expr(pair.next().unwrap()),
                 build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+            )))
+        }
+        Rule::OverlayExpr => {
+            let mut pair = pair.into_inner();
+            AstNode::Overlay(Box::new((
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()),
+                build_ast_from_expr(pair.next().unwrap().into_inner().next().unwrap()),
                 build_ast_from_expr(pair.next().unwrap()),
             )))
         }
